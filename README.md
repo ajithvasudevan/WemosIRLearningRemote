@@ -1,5 +1,5 @@
 # Wemos IR Learning Remote
-A learning IR remote using the Wemos D1 Mini 
+            -- A learning IR remote using the Wemos D1 Mini 
 
 This project is based on the excellent [IRremoteESP8266](https://github.com/markszabo/IRremoteESP8266) project by markszabo.
 
