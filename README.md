@@ -1,7 +1,7 @@
 # Wemos IR Learning Remote
 A learning IR remote using the Wemos D1 Mini 
 
-This project is based on the excellent ![IRremoteESP8266](https://github.com/markszabo/IRremoteESP8266) project by markszabo.
+This project is based on the excellent [IRremoteESP8266](https://github.com/markszabo/IRremoteESP8266) project by markszabo.
 
 ## Requirements
 ##### Hardware - 
@@ -55,7 +55,7 @@ In all the above cases, the topic "ir_server/cmd" is used. This topic is subscri
 This feature can be used to trigger programmatic events/processes using an IR remote. To use this feature, one has to create a mapping as described above, with the value seting omitted. Now, whenever a mapped remote button is pressed (pointing the remote at the Wemos' IR REceiver), an MQTT message of the form "<remote:btnname>" is published on the topic "ir_server/btn". So any MQTT client subscribing to this topic will know the remote name and button that was pressed. This can be used from a script, for e.g., to trigger some process. 
 
 #### About the Node-RED flow:
-The Node-RED flow requires the ![node-red-contrib-mongodb2](https://github.com/ozomer/node-red-contrib-mongodb2) node module to be installed in the Node-RED instance. Once the flow is imported into Node-RED, the **mongo2** node needs to be configured with the details of your MongoDB instance. 
+The Node-RED flow requires the [node-red-contrib-mongodb2](https://github.com/ozomer/node-red-contrib-mongodb2) node module to be installed in the Node-RED instance. Once the flow is imported into Node-RED, the **mongo2** node needs to be configured with the details of your MongoDB instance. 
 The Node-RED flow in this project creates several HTTP API that support the *Wemos IR Learning Remote*, in addition to publishing/subscribing to and processing a few MQTT topics necessary for the proper operation of the remote. These include setting the mapping record fields and saving/updating the mapping records in the DB.
 
 
