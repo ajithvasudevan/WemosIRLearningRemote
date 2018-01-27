@@ -227,7 +227,7 @@ const char* mqtt_password = "";
 #define MQTTprefix HOSTNAME  // Change this if you want the MQTT topic to be
                              // independent of the hostname.
 #define MQTTack MQTTprefix "/ack"  // Topic we send back acknowledgements on
-#define MQTTcommand MQTTprefix "/sendir"  // Topic we get new commands from.
+#define MQTTsendir MQTTprefix "/sendir"  // Topic we get new commands from.
 #define MQTTcmd MQTTprefix "/cmd"  // Topic we get new commands from.
 #endif  // MQTT_ENABLE
 
@@ -281,7 +281,7 @@ void handleRoot() {
 #ifdef MQTT_ENABLE
     "<p>MQTT server: " MQTT_SERVER ":" + String(MQTT_PORT) + " ("+
     (mqtt_client.connected() ? "Connected" : "Disconnected") + ")<br>"
-    "IRSend: " MQTTcommand "<br>"
+    "IRSend: " MQTTsendir "<br>"
     "Command topic: " MQTTcmd "<br>"
     "Acknowledgements topic: " MQTTack "</p>"
 #endif  // MQTT_ENABLE
@@ -1052,7 +1052,7 @@ bool reconnect() {
       mqtt_client.publish(MQTTack, "Connected");
       debug("connected.");
       // Subscribing to topic(s)
-      subscribing(MQTTcommand);
+      subscribing(MQTTsendir);
       subscribing(MQTTcmd);
     } else {
       debug("failed, rc=" + String(mqtt_client.state()) +
@@ -1484,7 +1484,7 @@ void sendIRCode(int const ir_type, uint64_t const code, char const * code_str,
 #ifdef MQTT_ENABLE
 void receivingMQTT(String const topic_name, String const callback_str) {
   Serial.print("Topic Received: "); Serial.println(topic_name);
-  if(topic_name.equals(MQTTcommand))
+  if(topic_name.equals(MQTTsendir))
   {
     char* tok_ptr;
     uint64_t code = 0;
