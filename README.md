@@ -3,7 +3,7 @@ A learning IR remote using the Wemos D1 Mini
 
 This project is based on the excellent ![IRremoteESP8266](https://github.com/markszabo/IRremoteESP8266) project by markszabo.
 
-## Requirements:
+## Requirements
 ##### Hardware - 
 - Wemos D1 Mini
 - TSOP 1838 IR Receiver
@@ -16,7 +16,7 @@ This project is based on the excellent ![IRremoteESP8266](https://github.com/mar
 - Arduino IDE
 - This project - 'ino' file to be flashed onto Wemos using Arduino IDE, Node-RED flow to be imported into Node-RED.
 
-
+## Introduction
 Using the **Wemos IR Learning Remote**, you can -
 1. generate IR signals of any consumer remote by sending a HTTP/MQTT message (this feature is from the original IRremoteESP8266 project)
 2. generate IR signals of any consumer IR remote from the IR signals of other remotes using a user-specified mapping
@@ -30,6 +30,7 @@ https://github.com/markszabo/IRremoteESP8266/blob/master/examples/IRMQTTServer/I
 and
 https://github.com/markszabo/IRremoteESP8266/blob/master/examples/IRrecvDumpV2/IRrecvDumpV2.ino
 
+## Details
 ### 1. Generating IR signals via network
 IR codes can be sent to the Wemos via MQTT or HTTP to activate the IR LED. See the examples from the IRremoteESP8266 project for documentation on the HTTP API/MQTT message format for IR generation and receiving. This feature is useful when one wants to programmatically send an IR command to a device like TV, Cable TV STB, etc.,
 
