@@ -48,7 +48,7 @@
  *
  * or
  *
- * Send a MQTT message to the topic 'ir_server/cmd' using the following
+ * Send a MQTT message to the topic 'ir_server/sendir' using the following
  * format (Order is important):
  *   protocol_num,hexcode  e.g. 7,E0E09966 which is Samsung(7), Power On code,
  *                              default bit size, default nr. of repeats.
@@ -80,7 +80,7 @@
  *     # Install a MQTT client
  *     $ sudo apt install mosquitto-clients
  *     # Send a 32-bit NEC code of 0x1234abcd via MQTT.
- *     $ mosquitto_pub -h 10.20.0.253 -t ir_server/cmd -m '3,1234abcd,32'
+ *     $ mosquitto_pub -h 10.20.0.253 -t ir_server/sendir -m '3,1234abcd,32'
  *
  * This server will send (back) what ever IR message it just transmitted to
  * the MQTT topic 'ir_server/sent' to confirm it has been performed. This works
@@ -109,7 +109,6 @@
 
 #include <ESP8266WiFiMulti.h>
 #include <ESP8266HTTPClient.h>
-#include <hashmap.h>
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
@@ -130,13 +129,9 @@
 #endif  // DECODE_AC
 
 
-any_value_t* value;
-any_key_t** keys;
-size_t keys_len;
-hashmap_ptr hmap;
 String MODE = "KEY";
 HTTPClient http;
-unsigned long lastcalltime;
+unsigned long lastcalltime, lastrecvtime;
 #ifdef MQTT_ENABLE
 // --------------------------------------------------------------------
 // * * * IMPORTANT * * *
@@ -145,8 +140,8 @@ unsigned long lastcalltime;
 // --------------------------------------------------------------------
 #include <PubSubClient.h>
 #endif  // MQTT_ENABLE
-#include <algorithm>
-#include <string>
+
+
 
 // Configuration parameters
 #define IR_LED 4  // GPIO the IR LED is connected to/controlled by. GPIO 4 = D2.
@@ -232,7 +227,8 @@ const char* mqtt_password = "";
 #define MQTTprefix HOSTNAME  // Change this if you want the MQTT topic to be
                              // independent of the hostname.
 #define MQTTack MQTTprefix "/ack"  // Topic we send back acknowledgements on
-#define MQTTcommand MQTTprefix "/cmd"  // Topic we get new commands from.
+#define MQTTcommand MQTTprefix "/sendir"  // Topic we get new commands from.
+#define MQTTcmd MQTTprefix "/cmd"  // Topic we get new commands from.
 #endif  // MQTT_ENABLE
 
 // HTML arguments we will parse for IR code information.
@@ -285,7 +281,8 @@ void handleRoot() {
 #ifdef MQTT_ENABLE
     "<p>MQTT server: " MQTT_SERVER ":" + String(MQTT_PORT) + " ("+
     (mqtt_client.connected() ? "Connected" : "Disconnected") + ")<br>"
-    "Command topic: " MQTTcommand "<br>"
+    "IRSend: " MQTTcommand "<br>"
+    "Command topic: " MQTTcmd "<br>"
     "Acknowledgements topic: " MQTTack "</p>"
 #endif  // MQTT_ENABLE
     "<br><hr>"
@@ -793,10 +790,12 @@ void handleMode() {
 
   for (uint16_t i = 0; i < server.args(); i++) {
     if (server.argName(i) == "mode")
+      debug("New MODE received via HTTP");
       MODE = server.arg(i);
-      Serial.print("MODE set to "); Serial.println(MODE);
+      String msg = "MODE set to " + MODE;
+      Serial.println(msg);
+      mqtt_client.publish(MQTTack, msg.c_str());
   }
-  debug("New MODE received via HTTP");
 
   server.send(200, "text/html", "MODE set to " + MODE);
 }
@@ -897,14 +896,14 @@ void dumpACInfo(decode_results *results) {
   if (description != "")  Serial.println("Mesg Desc.: " + description);
 }
 
-void initHashMapFromHTTP(void) {
-  http.begin("172.20.1.120", 1880, "/esp");
+String getHTTPResponse(String url, int blen) {
+  Serial.print("Calling getHTTPResponse( ) with URL "); Serial.println(url);
+  http.begin(url);
   int httpCode = http.GET();
   if(httpCode > 0) {
-      Serial.printf("[HTTP] GET... code: %d\n", httpCode);
       if(httpCode == HTTP_CODE_OK) {
           int len = http.getSize();
-          char buff[3000] = { 0 };
+          char buff[100] = { 0 };
           // get tcp stream
           WiFiClient * stream = http.getStreamPtr();
           int tc = 0;
@@ -929,112 +928,35 @@ void initHashMapFromHTTP(void) {
           //Serial.write(buff, tc);
           //http.writeToStream(&Serial);
           String resp = String(buff);
-          Serial.println(buff);
-
-          int from = 1;
-          hmap = hashmap_new(120, NULL, NULL);
-
-          char key1[12] = {0};
-          char value1[15] = {0};
-          int m = 0;
-          bool inKey = true;
-          for(int k=0; k<tc; k++ ) {
-            if(inKey) {
-              if(buff[k] != ':') key1[m++] = buff[k];
-              else {
-                key1[m++] = 0; 
-                inKey = false; 
-                m = 0; 
-              }
-            } else {
-              
-              if(buff[k] != '\n') value1[m++] = buff[k];
-              else {
-                value1[m++] = 0; 
-                inKey = true; 
-                m = 0;
-                char *key2 = (char *)malloc(13);
-                char *value2 = (char *)malloc(16);
-                strcpy(key2, key1);
-                strcpy(value2, value1);
-                Serial.print(key1); Serial.print("+++"); Serial.println(value1);
-                Serial.print(key2); Serial.print("---"); Serial.println(value2); 
-                hashmap_put(hmap, key2, value2);
-                key1[12] = {0};
-                value1[15] = {0};
-              }
-            }
-          }
-      }
-  } else {
-      Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
-  }
-
-  http.end();
-
-}
-
-
-
-String callURL(const char* url) {              // url =  /setkey?key=3_123456
-  Serial.print("Calling URL "); Serial.println(url);
-  http.begin("172.20.1.120", 1880, url);
-  int httpCode = http.GET();
-  if(httpCode > 0) {
-      Serial.printf("[HTTP] GET... code: %d\n", httpCode);
-      if(httpCode == HTTP_CODE_OK) {
-          int len = http.getSize();
-          char buff[100] = { 0 };
-          // get tcp stream
-          WiFiClient * stream = http.getStreamPtr();
-          int tc = 0;
-          // read all data from server
-          while(http.connected() && (len > 0 || len == -1)) {
-              // get available data size
-              size_t size = stream->available();
-
-              if(size) {
-                  // read up to 128 byte
-                  int c = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
-                  tc += c;
-                  if(len > 0) {
-                      len -= c;
-                  }
-              }
-              delay(1);
-          }          
-          String resp = String(buff);
-          Serial.println(buff);
+          Serial.print("code: "); Serial.print(httpCode); Serial.print(" response: "); Serial.println(resp);
+          http.end();
           return resp;
-      } else {
-        return "NON_200_HTTP_CODE";
       }
   } else {
-      Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
-      return "[HTTP] GET... failed";
+      Serial.printf("HHTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
+      http.end();
+      return "";
   }
-
-  http.end();
-
 }
 
 
 void setup(void) {
   Serial.begin(115200);
+  Serial.println("The Begining...");
   lastcalltime = millis();
   http.setReuse(true);
 
   irsend.begin();
-
+  Serial.println("irsend.begin()");
   #ifdef DEBUG
 
   #endif  // DEBUG
 
   pinMode(LEARN_MODE_PIN, INPUT);
 
+  Serial.println("Before setup_wifi()");
   setup_wifi();
-
-  initHashMapFromHTTP();
+  Serial.println("After  setup_wifi()");
 
   // Wait a bit for things to settle.
   delay(1500);
@@ -1131,6 +1053,7 @@ bool reconnect() {
       debug("connected.");
       // Subscribing to topic(s)
       subscribing(MQTTcommand);
+      subscribing(MQTTcmd);
     } else {
       debug("failed, rc=" + String(mqtt_client.state()) +
             " Try again in a bit.");
@@ -1177,39 +1100,40 @@ void loop(void) {
   //Serial.println(learnMode);
  
   // Check if the IR code has been received.
-  if (irrecv.decode(&results)) {
+  if (irrecv.decode(&results) && (millis() - lastrecvtime) > 1200) {
+    lastrecvtime = millis();
     // Display a crude timestamp.
     uint32_t now = millis();
-    Serial.println("\n\n==============================Received IR Signal=========================================");
-    Serial.printf("Timestamp : %06u.%03u\n", now / 1000, now % 1000);
+    Serial.print("\n\n==============================Received IR Signal========================================="); Serial.println(millis());
+//    Serial.printf("Timestamp : %06u.%03u\n", now / 1000, now % 1000);
     if (results.overflow)
       Serial.printf("WARNING: IR code is too big for buffer (>= %d). "
                     "This result shouldn't be trusted until this is resolved. "
                     "Edit & increase CAPTURE_BUFFER_SIZE.\n",
                     CAPTURE_BUFFER_SIZE);
     // Display the basic output of what we found.
-    Serial.print(resultToHumanReadableBasic(&results));
-    dumpACInfo(&results);  // Display any extra A/C info if we have it.
-    yield();  // Feed the WDT as the text output can take a while to print.
+//    Serial.print(resultToHumanReadableBasic(&results));
+//    dumpACInfo(&results);  // Display any extra A/C info if we have it.
+//    yield();  // Feed the WDT as the text output can take a while to print.
 
     // Display the library version the message was captured with.
-    Serial.print("Library   : v");
-    Serial.println(_IRREMOTEESP8266_VERSION_);
-    Serial.println();
+//    Serial.print("Library   : v");
+//    Serial.println(_IRREMOTEESP8266_VERSION_);
+//    Serial.println();
 
     // Output RAW timing info of the result.
-    //Serial.println(resultToTimingInfo(&results));
-    //yield();  // Feed the WDT (again)
+//    Serial.println(resultToTimingInfo(&results));
+//    yield();  // Feed the WDT (again)
 
     // Output the results as source code
-    Serial.println(resultToSourceCode(&results));
-    Serial.println("");  // Blank line between entries
-    yield();  // Feed the WDT (again)
+//    Serial.println(resultToSourceCode(&results));
+//    Serial.println("");  // Blank line between entries
+//    yield();  // Feed the WDT (again)
 
     //Serial.println("Sending MQTT");
 
-    String output = "_________________________RBegin\n";
-    output = output + resultToHumanReadableBasic(&results);
+    String output = "";
+//    output = output + resultToHumanReadableBasic(&results);
     String enc = String(results.decode_type);
     output = output + "*Encoding : " + enc;
     String code = uint64ToString(results.value, 16);
@@ -1235,64 +1159,43 @@ void loop(void) {
     output = output + "\n*Raw Data : " + rawData;
 
     String key = enc + "_" + code;
-    output = output + "\n*Key      : " + key.c_str();
-    output = output + "\n__________________________REnd\n";
-    yield();  // Feed the WDT (again)
-    if(MODE.equals("KEY") && (millis() - lastcalltime) > 500) { 
-      Serial.println("MODE set to KEY");
-      callURL((String("/setkey?key=") + key).c_str());
-      lastcalltime = millis(); 
-    }
-    else if(MODE.equals("VALUE")  && (millis() - lastcalltime) > 500) { 
-      Serial.println("MODE set to VALUE");
-      callURL((String("/setvalue?value=") + key).c_str());
-      lastcalltime = millis(); 
-    }
-    else Serial.println("Multiple IR received or MODE is NOT set!");
-    
-    mqtt_client.publish(MQTTack, output.c_str());
+    output = output + "\n*IR Code  : " + key.c_str();
+//    output = output + "\n";
     Serial.println(output);
-    Serial.println("\n==============================Received IR Signal==(END)=======================================");
+    mqtt_client.publish(MQTTack, output.c_str());
+    yield();
+    if(MODE.equals("KEY") && (millis() - lastcalltime) > 1000) { 
+      lastcalltime = millis();
+      String msg = "Setting KEY to " + key;
+      Serial.println(msg);
+      mqtt_client.publish(MQTTack, msg.c_str());
+      getHTTPResponse("http://172.20.1.120:1880/setkey?key=" + key, 100);
+     }
+    else if(MODE.equals("VALUE")  && (millis() - lastcalltime) > 1000) { 
+      lastcalltime = millis(); 
+      String msg = "Setting VALUE to " + key;
+      Serial.println(msg);
+      mqtt_client.publish(MQTTack, msg.c_str());
+      getHTTPResponse("http://172.20.1.120:1880/setvalue?value=" + key, 100);
+    }
+    else Serial.println("------------------\nMultiple IR received or MODE is NOT set!");
+    
     yield();  // Feed the WDT (again)
 
-    Serial.println("Just before reading Hashmap");
-//    hashmap_keys(hmap, &keys, &keys_len);
-//    Serial.print("Hashmap Length = "); Serial.println(keys_len);
-    boolean valid = false;
-    if (HASHMAP_OK == hashmap_keys(hmap, &keys, &keys_len)) {
-        for (int i = 0; i < keys_len; i++) {
-                char* k = (char*) keys[i];
-                Serial.print("key: ");
-                Serial.println(k);
-                if(String(k).equals(key.c_str())) {
-                  valid = true;
-                  break;
-                }
-        }
-    } else {
-        Serial.print("Unable to retrieve keys.\n");
-    }
-
-    if(valid) {
-      hashmap_get(hmap, key.c_str(), &value);
-  
-      String newIRCode = String((char*)value);
-      Serial.print("\n*Translated : ");
-      Serial.println((char*)value);
+    String newIRCode = getHTTPResponse("http://172.20.1.120:1880/getmapping?key=" + key, 20);
+   
+    if(!newIRCode.equals("NA")) {
+      Serial.print("-------------------\nFound map : "); Serial.print(key); Serial.print(" : "); Serial.println(newIRCode);        
       int i = newIRCode.indexOf("_");
       String newEnc = newIRCode.substring(0, i);
       String newCode = newIRCode.substring(i+1);
-      Serial.println("===============================Sending mapped IR Signal =================================");
-      Serial.print("Mapped code: ");
-      Serial.println(newIRCode);
       sendIR(newEnc.c_str(), newCode.c_str(), 0, 0);
-      String msg = "____________________SBegin\nSent IR: " + newIRCode + "\n____________________SEnd";
+      String msg = "Sent IR: " + newIRCode;
       mqtt_client.publish(MQTTack, msg.c_str());
-      Serial.println("===============================Sent mapped IR Signal =================================");
+      Serial.print("===============================Sent mapped IR Signal ================================="); Serial.println(millis());
       delay(100);
     } else {
-      Serial.println("\n*Translated : NA");
-      Serial.println("Invalid IR Code Received / Mapping Not Available");     
+      Serial.println("------------------\nInvalid IR Code Received / Mapping Not Available");     
     }
     
   } else {
@@ -1331,8 +1234,6 @@ uint64_t getUInt64fromHex(char const *str) {
 //   repeat:   Nr. of times the message is to be repeated. (Not all protcols.)
 void sendIRCode(int const ir_type, uint64_t const code, char const * code_str,
                 uint16_t bits, uint16_t repeat) {
-Serial.print("code_str = ");
-Serial.println(code_str);
                   
   // Create a pseudo-lock so we don't try to send two codes at the same time.
   while (ir_lock)
@@ -1572,54 +1473,68 @@ Serial.println(code_str);
       debug("Repeats: " + String(repeat));
 
 #ifdef MQTT_ENABLE
-      mqtt_client.publish(MQTTack, (String(ir_type) + "," +
+/*      mqtt_client.publish(MQTTack, (String(ir_type) + "," +
                                     uint64ToString(code, 16)
                                     + "," + String(bits) + "," +
-                                    String(repeat)).c_str());
+                                    String(repeat)).c_str()); */
 #endif  // MQTT_ENABLE
   }
 }
 
 #ifdef MQTT_ENABLE
 void receivingMQTT(String const topic_name, String const callback_str) {
-  char* tok_ptr;
-  uint64_t code = 0;
-  uint16_t nbits = 0;
-  uint16_t repeat = 0;
-
-  debug("Receiving data by MQTT topic " + topic_name);
-
-  // Make a copy of the callback string as strtok destroys it.
-  char* callback_c_str = strdup(callback_str.c_str());
-  debug("MQTT Payload (raw): " + callback_str);
-
-  // Get the numeric protocol type.
-  int ir_type = strtoul(strtok_r(callback_c_str, ",", &tok_ptr), NULL, 10);
-  char* next = strtok_r(NULL, ",", &tok_ptr);
-  // If there is unparsed string left, try to convert it assuming it's hex.
-  if (next != NULL) {
-    code = getUInt64fromHex(next);
-    next = strtok_r(NULL, ",", &tok_ptr);
-  } else {
-    // We require at least two value in the string. Give up.
-    return;
+  Serial.print("Topic Received: "); Serial.println(topic_name);
+  if(topic_name.equals(MQTTcommand))
+  {
+    char* tok_ptr;
+    uint64_t code = 0;
+    uint16_t nbits = 0;
+    uint16_t repeat = 0;
+  
+    debug("Receiving data by MQTT topic " + topic_name);
+  
+    // Make a copy of the callback string as strtok destroys it.
+    char* callback_c_str = strdup(callback_str.c_str());
+    debug("MQTT Payload (raw): " + callback_str);
+  
+    // Get the numeric protocol type.
+    int ir_type = strtoul(strtok_r(callback_c_str, ",", &tok_ptr), NULL, 10);
+    char* next = strtok_r(NULL, ",", &tok_ptr);
+    // If there is unparsed string left, try to convert it assuming it's hex.
+    if (next != NULL) {
+      code = getUInt64fromHex(next);
+      next = strtok_r(NULL, ",", &tok_ptr);
+    } else {
+      // We require at least two value in the string. Give up.
+      return;
+    }
+    // If there is still string left, assume it is the bit size.
+    if (next != NULL) {
+      nbits = atoi(next);
+      next = strtok_r(NULL, ",", &tok_ptr);
+    }
+    // If there is still string left, assume it is the repeat count.
+    if (next != NULL)
+      repeat = atoi(next);
+  
+    free(callback_c_str);
+  
+  
+    // send received MQTT value by IR signal
+    sendIRCode(ir_type, code,
+               callback_str.substring(callback_str.indexOf(",") + 1).c_str(),
+               nbits, repeat);
   }
-  // If there is still string left, assume it is the bit size.
-  if (next != NULL) {
-    nbits = atoi(next);
-    next = strtok_r(NULL, ",", &tok_ptr);
+  else if(topic_name.equals(MQTTcmd)) {
+    debug("New Command received via MQTT: " + callback_str);
+    if(callback_str.equals("KEY") || callback_str.equals("VALUE")) {
+      MODE = callback_str;
+      String msg = "MODE set to " + MODE;
+      Serial.println(msg);
+      mqtt_client.publish(MQTTack, msg.c_str());      
+    }
+   
   }
-  // If there is still string left, assume it is the repeat count.
-  if (next != NULL)
-    repeat = atoi(next);
-
-  free(callback_c_str);
-
-
-  // send received MQTT value by IR signal
-  sendIRCode(ir_type, code,
-             callback_str.substring(callback_str.indexOf(",") + 1).c_str(),
-             nbits, repeat);
 }
 
 // Callback function, when the gateway receive an MQTT value on the topics
