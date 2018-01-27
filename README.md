@@ -56,7 +56,7 @@ This feature can be used to trigger programmatic events/processes using an IR re
 
 #### About the Node-RED flow:
 The Node-RED flow requires the ![node-red-contrib-mongodb2](https://github.com/ozomer/node-red-contrib-mongodb2) node module to be installed in the Node-RED instance. Once the flow is imported into Node-RED, the **mongo2** node needs to be configured with the details of your MongoDB instance. 
-The Node-RED flow in this project creates several HTTP API that support the Wemos IR Learning Remote, in addition to subscribing to and processing a few MQTT topics necessary for the proper operation of the remote. These include setting the mapping record fields and saving/updating the mapping records in the DB.
+The Node-RED flow in this project creates several HTTP API that support the *Wemos IR Learning Remote*, in addition to publishing/subscribing to and processing a few MQTT topics necessary for the proper operation of the remote. These include setting the mapping record fields and saving/updating the mapping records in the DB.
 
 
 
